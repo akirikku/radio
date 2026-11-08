@@ -270,19 +270,33 @@
     if (hls) { hls.destroy(); hls = null; }
   }
 
-  function loadStream() {
+  // KBS hands out signed stream links that expire, so fetch a fresh one on every tune.
+  async function streamUrl(s) {
+    if (!s.kbs) return s.stream;
+    const r = await fetch(`https://cfpwwwapi.kbs.co.kr/api/v1/landing/live/channel_code/${s.kbs}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const items = (await r.json()).channel_item || [];
+    return (items.find(c => c.media_type === "radio") || items[0])?.service_url;
+  }
+
+  let loadSeq = 0;
+  async function loadStream() {
     if (!state.power) return;
-    const s = STATIONS[state.idx];
+    const seq = ++loadSeq, s = STATIONS[state.idx];
     stopHls();
-    if (/\.m3u8(\?|$)/.test(s.stream) && window.Hls && Hls.isSupported()) {
+    let url;
+    try { url = await streamUrl(s); } catch (e) { console.warn("stream", s.name, e); }
+    if (seq !== loadSeq || !state.power) return; // tuned elsewhere meanwhile
+    if (!url) { retryStream(); return; }
+    if (/\.m3u8(\?|$)/.test(url) && window.Hls && Hls.isSupported()) {
       hls = new Hls({ liveSyncDurationCount: 3 });
       hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) retryStream(); });
-      hls.loadSource(s.stream);
+      hls.loadSource(url);
       hls.attachMedia(audio);
-    } else if (/\.m3u8(\?|$)/.test(s.stream)) {
-      audio.src = s.stream; // Safari plays HLS natively
+    } else if (/\.m3u8(\?|$)/.test(url)) {
+      audio.src = url; // Safari plays HLS natively
     } else {
-      audio.src = s.stream + (s.stream.includes("?") ? "&" : "?") + "nocache=" + Date.now();
+      audio.src = url + (url.includes("?") ? "&" : "?") + "nocache=" + Date.now();
     }
     audio.play().catch(err => {
       if (err.name === "NotAllowedError") setPower(false); // autoplay blocked: wait for a click
@@ -366,8 +380,10 @@
 
   /* ---------- Now playing ---------- */
   // A source fetches song info for the given station indexes and resolves to
-  // { [index]: { key, artist, title, art, ts, len, listeners? } }. ts is when the song
-  // started (ms), or null when unknown. It may return more stations than were asked for.
+  // { [index]: { key, artist, title, art, ts, len, listeners?, noLookup? } }. ts is when the
+  // song started (ms), or null when unknown; len is 0 when unknown. It may return more
+  // stations than were asked for. Each station names its source, else the page's default.
+  const sourceOf = i => STATIONS[i].source || C.source;
   const SOURCES = {
     // asia DREAM radio's station software: one history call per station.
     async asiadream(indexes) {
@@ -432,16 +448,126 @@
       });
       return out;
     },
+
+    // Centova Cast stations (Big B Radio): the station's own "now playing" call.
+    async centova(indexes) {
+      const out = {};
+      await Promise.all(indexes.map(async i => {
+        const s = STATIONS[i];
+        try {
+          const r = await fetch(s.rpc, { cache: "no-store" });
+          if (!r.ok) throw new Error(r.status);
+          const d = (await r.json()).data?.[0], t = d?.track;
+          if (!t) { out[i] = null; return; }
+          out[i] = {
+            key: d.song || `${t.artist}|${t.title}`,
+            artist: t.artist || "", title: t.title || "",
+            art: t.imageurl && !/nocover/.test(t.imageurl) ? t.imageurl : null,
+            ts: t.started ? t.started * 1000 : null, len: 0, listeners: d.listeners,
+          };
+        } catch (e) { console.warn("metadata", s.name, e); }
+      }));
+      return out;
+    },
+
+    // laut.fm: current song with exact start and end times, but no artwork.
+    async lautfm(indexes) {
+      // "2026-11-08 20:17:02 +0100" -> "2026-11-08T20:17:02+01:00"
+      const time = t => Date.parse(t.replace(" ", "T").replace(/ ([+-]\d\d)(\d\d)$/, "$1:$2"));
+      const out = {};
+      await Promise.all(indexes.map(async i => {
+        const s = STATIONS[i];
+        try {
+          const r = await fetch(`https://api.laut.fm/station/${s.laut}/current_song`, { cache: "no-store" });
+          if (!r.ok) throw new Error(r.status);
+          const t = await r.json();
+          const ts = time(t.started_at), end = time(t.ends_at);
+          out[i] = {
+            key: `${t.id}|${t.started_at}`,
+            artist: t.artist?.name?.trim() || "", title: t.title?.trim() || "",
+            art: null, ts: isNaN(ts) ? null : ts, len: isNaN(end) ? 0 : end - ts,
+          };
+        } catch (e) { console.warn("metadata", s.name, e); }
+      }));
+      return out;
+    },
+
+    // KBS publishes the program on air, not the song: show its title, host and time slot.
+    async kbs(indexes) {
+      // Schedule times are "HHMMSSff" in Korea time (UTC+9).
+      const KST = 9 * 3600e3;
+      const at = hhmmss => {
+        const k = new Date(Date.now() + KST);
+        return Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate(),
+          +hhmmss.slice(0, 2), +hhmmss.slice(2, 4), +hhmmss.slice(4, 6)) - KST;
+      };
+      const out = {};
+      await Promise.all(indexes.map(async i => {
+        const s = STATIONS[i];
+        try {
+          const r = await fetch(`https://static.api.kbs.co.kr/mediafactory/v1/schedule/onair_now?rtype=json&local_station_code=00&channel_code=${s.kbs}`, { cache: "no-store" });
+          if (!r.ok) throw new Error(r.status);
+          const p = (await r.json())[0]?.schedules?.[0];
+          if (!p) { // nothing scheduled (overnight): show the channel logo
+            out[i] = { key: "off-schedule", artist: "", title: "", art: s.logo || null, fit: "contain", ts: null, len: 0, noLookup: true };
+            return;
+          }
+          let ts = at(p.service_start_time), end = at(p.service_end_time);
+          if (ts > Date.now() + 3600e3) ts -= 864e5; // started before midnight KST
+          if (end <= ts) end += 864e5;
+          out[i] = {
+            key: `${p.program_title}|${p.service_start_time}`,
+            artist: p.program_title || "", title: p.program_actor ? `${L.host || ""} ${p.program_actor}`.trim() : "",
+            // Program images and logos are wide, so fit them inside the square instead of cropping.
+            art: p.image_w || s.logo || null, fit: "contain", ts, len: end - ts, noLookup: true,
+          };
+        } catch (e) { console.warn("metadata", s.name, e); }
+      }));
+      return out;
+    },
   };
+
+  // Cover art for songs whose station sends none: ask the iTunes Search API (CORS-open).
+  // Only accept a hit whose artist resembles ours, so a shared song title can't pull in a stranger.
+  const artCache = new Map();
+  const norm = t => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
+  function findArt(m) {
+    if (!m.artist || !m.title) return Promise.resolve(null);
+    const term = `${m.artist} ${m.title}`;
+    if (!artCache.has(term)) {
+      const want = norm(m.artist);
+      artCache.set(term, fetch(`https://itunes.apple.com/search?entity=song&limit=5&term=${encodeURIComponent(term)}`)
+        .then(r => r.ok ? r.json() : { results: [] })
+        .then(d => {
+          const hit = d.results.find(x => {
+            const a = norm(x.artistName || "");
+            return a && (a.includes(want) || want.includes(a) || a.split(" ")[0] === want.split(" ")[0]);
+          });
+          return hit ? hit.artworkUrl100.replace("100x100bb", "600x600bb") : null;
+        })
+        .catch(() => null));
+    }
+    return artCache.get(term);
+  }
 
   let lastPoll = 0;
   async function refresh(indexes) {
     if (indexes.includes(state.idx)) lastPoll = Date.now();
-    let metas;
-    try { metas = await SOURCES[C.source](indexes); } catch (e) { console.warn("metadata", e); return; }
+    const bySource = {};
+    indexes.forEach(i => (bySource[sourceOf(i)] ||= []).push(i));
+    const results = await Promise.all(Object.entries(bySource).map(([name, ix]) =>
+      SOURCES[name](ix).catch(e => { console.warn("metadata", name, e); return {}; })));
+    const metas = Object.assign({}, ...results);
     for (const i of Object.keys(metas)) {
-      state.nowByStation[i] = metas[i];
+      const m = metas[i], prev = state.nowByStation[i];
+      if (m && !m.art && prev && prev.key === m.key) m.art = prev.art; // keep art found earlier
+      state.nowByStation[i] = m;
       updatePresetCaption(+i);
+      if (m && !m.art && !m.noLookup) findArt(m).then(url => {
+        if (!url) return;
+        m.art = url;
+        if (state.meta === m) { showArt(m); updateMediaSession(); }
+      });
     }
     if (state.power && state.idx in metas) showMeta(metas[state.idx]);
   }
@@ -450,8 +576,9 @@
 
   function updatePresetCaption(i) {
     const m = state.nowByStation[i];
-    presetEls[i].now.textContent = m ? `${m.artist} – ${m.title}` : freqFor(i).toFixed(1) + " MHz";
-    presetEls[i].b.title = m ? `${STATIONS[i].name}\n${m.artist} – ${m.title}` : STATIONS[i].name;
+    const now = m ? [m.artist, m.title].filter(Boolean).join(" – ") : "";
+    presetEls[i].now.textContent = now || freqFor(i).toFixed(1) + " MHz";
+    presetEls[i].b.title = now ? `${STATIONS[i].name}\n${now}` : STATIONS[i].name;
   }
 
   function setLine(el, text, animate) {
@@ -478,20 +605,25 @@
     if (changed) {
       setLine($("artist"), m ? m.artist : "", true);
       setLine($("title"), m ? m.title : "", true);
-      const img = $("artImg");
-      img.classList.remove("show");
-      $("artPh").style.display = "";
-      if (m && m.art) {
-        const src = m.art;
-        img.onload = () => { if (state.meta && state.meta.art === src) { img.classList.add("show"); $("artPh").style.display = "none"; } };
-        img.src = src;
-      }
       updateMediaSession();
     }
+    showArt(m);
     // Footer: listener count when the source has one, otherwise the station's slogan.
     const tagline = (STATIONS[state.idx].tagline || "").replace(/^'|'$/g, "");
     $("info").textContent = m && m.listeners ? L.listening(m.listeners) : tagline;
     tickProgress();
+  }
+
+  function showArt(m) {
+    const img = $("artImg"), src = (m && m.art) || "";
+    if (img.dataset.src === src) return; // already showing (or loading) this one
+    img.dataset.src = src;
+    img.classList.toggle("contain", !!m && m.fit === "contain");
+    img.classList.remove("show");
+    $("artPh").style.display = "";
+    if (!src) return;
+    img.onload = () => { if (img.dataset.src === src) { img.classList.add("show"); $("artPh").style.display = "none"; } };
+    img.src = src;
   }
 
   const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };

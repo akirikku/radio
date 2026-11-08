@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>노을 Noeul Radio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=Share+Tech+Mono&family=Noto+Sans+KR:wght@400;700&family=Gowun+Batang:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../player/radio.css">
+<style>
+:root {
+  --font-body: "Noto Sans KR", system-ui, sans-serif;
+  --font-vfd: "Share Tech Mono", "Noto Sans KR", monospace;
+  --font-mark: "Gowun Batang", serif;
+}
+.brand .mark { font-size: 24px; }
+</style>
+</head>
+<body>
+<script>
+window.RADIO = {
+  id: "noeul",
+  title: "노을 Noeul Radio",
+  band: { min: 88, max: 108, first: 89, last: 107 }, // Korean FM band
+  // Each station names its own song-info source (centova, lautfm, kbs) in stations.js.
+  labels: {
+    mark: "노을", brand: "NOEUL", model: "NR-8800",
+    subtitle: "FM Stereo Tuner · 스테레오 튜너",
+    dialTag: "주파수 MHz",
+    memory: 'Memory · <span class="native">프리셋</span>',
+    push: "PUSH POWER",
+    tuned: "TUNED", scanning: "SCAN", mute: "MUTE", noArt: "NO ART",
+    down: "◀ DOWN", scan: "SCAN", up: "UP ▶",
+    tuning: 'Tuning · <span class="native">선국</span>',
+    power: "POWER", powerNote: "전원",
+    phones: "Phones",
+    volume: 'Volume<br><span class="native">음량</span>',
+    host: "진행",
+    ariaPresets: "Station presets", ariaDown: "Tune down", ariaScan: "Auto scan", ariaUp: "Tune up",
+    ariaTuning: "Tuning", ariaPower: "Power", ariaVolume: "Volume",
+    keys: "<kbd>1</kbd>–<kbd>5</kbd> presets &nbsp; <kbd>←</kbd><kbd>→</kbd> tune &nbsp; <kbd>↑</kbd><kbd>↓</kbd> volume &nbsp; <kbd>S</kbd> scan &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Space</kbd> power",
+    credit: 'Streams courtesy of <a href="https://bigbradio.net" target="_blank" rel="noopener">Big B Radio</a>, <a href="https://laut.fm" target="_blank" rel="noopener">laut.fm</a> and <a href="https://www.kbs.co.kr" target="_blank" rel="noopener">KBS</a> &nbsp;·&nbsp; <a href="../">茜 Akane</a> · <a href="../istanbul/">Radyo İstanbul</a>',
+    listening: n => `${n} listening`,
+    fallbackArtist: "노을 Noeul Radio",
+    noStations: "NO STATIONS — run resolve_korea.py",
+  },
+};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.6.13/hls.min.js"></script>
+<script src="stations.js"></script>
+<script src="../player/radio.js"></script>
+</body>
+</html>
