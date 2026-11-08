@@ -176,11 +176,12 @@
   }
 
   /* ---------- Audio ---------- */
-  // Both station sets send Access-Control-Allow-Origin: *, so the element can feed Web Audio
-  // (real spectrum + level meter). Plain streams play directly; HLS (.m3u8) goes through
-  // hls.js and Media Source Extensions, or natively in Safari. If CORS ever breaks on a
-  // plain stream we fall back to an element outside Web Audio.
-  let audio, ctx, master, analyser, noiseGain, hls, plain = false, everPlayed = false;
+  // Streams that send CORS headers play through `wired`, an element feeding Web Audio (real
+  // spectrum + level meter). Plain streams play directly; HLS (.m3u8) goes through hls.js and
+  // Media Source Extensions, or natively in Safari. Stations marked `cors: false` play through
+  // `bare`, an element outside Web Audio, since the browser would silence them in the graph.
+  // If CORS breaks before anything has played, every station falls back to `bare` (noGraph).
+  let ctx, master, analyser, noiseGain, hls, bare, plain = false, noGraph = false, everPlayed = false;
   let loadTimer, staticTimer;
 
   function makeAudio(withCors) {
@@ -192,7 +193,20 @@
     a.addEventListener("error", onAudioError);
     return a;
   }
-  audio = makeAudio(true);
+  const wired = makeAudio(true);
+  let audio = wired;
+
+  // Switch the playing element, silencing the other one.
+  function useElement(el) {
+    if (el !== audio) {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      audio = el;
+    }
+    plain = audio !== wired || noGraph;
+    applyVolume();
+  }
 
   function ensureGraph() {
     if (ctx) { if (ctx.state === "suspended") ctx.resume(); return; }
@@ -203,8 +217,8 @@
       analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.78;
-      if (!plain) {
-        const src = ctx.createMediaElementSource(audio);
+      if (!noGraph) {
+        const src = ctx.createMediaElementSource(wired);
         src.connect(analyser);
         analyser.connect(master);
       }
@@ -223,19 +237,17 @@
       applyVolume();
     } catch (e) {
       console.warn("Web Audio unavailable", e);
-      ctx = null; plain = true;
+      ctx = null; noGraph = plain = true;
     }
   }
 
-  function onAudioError() {
+  function onAudioError(e) {
+    if (e && e.target !== audio) return; // the element we just switched away from
     if (!state.power || !audio.getAttribute("src")) return;
     if (!plain && !everPlayed && !hls) {
       // Most likely a CORS problem: retry without Web Audio routing.
       console.warn("Stream failed with CORS; retrying in plain mode");
-      plain = true;
-      audio.removeAttribute("src");
-      audio = makeAudio(false);
-      applyVolume();
+      noGraph = true;
       loadStream();
       return;
     }
@@ -288,6 +300,7 @@
     try { url = await streamUrl(s); } catch (e) { console.warn("stream", s.name, e); }
     if (seq !== loadSeq || !state.power) return; // tuned elsewhere meanwhile
     if (!url) { retryStream(); return; }
+    useElement(s.cors === false || noGraph ? (bare ||= makeAudio(false)) : wired);
     if (/\.m3u8(\?|$)/.test(url) && window.Hls && Hls.isSupported()) {
       hls = new Hls({ liveSyncDurationCount: 3 });
       hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) retryStream(); });
@@ -470,28 +483,6 @@
       return out;
     },
 
-    // laut.fm: current song with exact start and end times, but no artwork.
-    async lautfm(indexes) {
-      // "2026-11-08 20:17:02 +0100" -> "2026-11-08T20:17:02+01:00"
-      const time = t => Date.parse(t.replace(" ", "T").replace(/ ([+-]\d\d)(\d\d)$/, "$1:$2"));
-      const out = {};
-      await Promise.all(indexes.map(async i => {
-        const s = STATIONS[i];
-        try {
-          const r = await fetch(`https://api.laut.fm/station/${s.laut}/current_song`, { cache: "no-store" });
-          if (!r.ok) throw new Error(r.status);
-          const t = await r.json();
-          const ts = time(t.started_at), end = time(t.ends_at);
-          out[i] = {
-            key: `${t.id}|${t.started_at}`,
-            artist: t.artist?.name?.trim() || "", title: t.title?.trim() || "",
-            art: null, ts: isNaN(ts) ? null : ts, len: isNaN(end) ? 0 : end - ts,
-          };
-        } catch (e) { console.warn("metadata", s.name, e); }
-      }));
-      return out;
-    },
-
     // KBS publishes the program on air, not the song: show its title, host and time slot.
     async kbs(indexes) {
       // Schedule times are "HHMMSSff" in Korea time (UTC+9).
@@ -527,6 +518,39 @@
     },
   };
 
+  // LISTEN.moe pushes each new song over a WebSocket, so keep one socket per station open
+  // and report straight away; a poll just returns the latest song.
+  const moe = {};
+  SOURCES.listenmoe = async function (indexes) {
+    const out = {};
+    for (const i of indexes) {
+      if (!moe[i]) moeConnect(i);
+      if (moe[i].meta) out[i] = moe[i].meta;
+    }
+    return out;
+  };
+  function moeConnect(i) {
+    const s = STATIONS[i], c = moe[i] = moe[i] || {};
+    const ws = c.ws = new WebSocket(s.gateway);
+    ws.onmessage = e => {
+      const { op, d } = JSON.parse(e.data);
+      if (op === 0) { clearInterval(c.beat); c.beat = setInterval(() => ws.readyState === 1 && ws.send('{"op":9}'), d.heartbeat); }
+      if (op !== 1 || !d.song) return;
+      const t = d.song, al = (t.albums || []).find(a => a.image);
+      // Show Hangul with the romanization alongside, e.g. "헤이즈 (Heize)".
+      const both = (a, b) => b && b !== a ? `${a} (${b})` : a;
+      c.meta = {
+        key: `${t.id}|${d.startTime}`,
+        artist: (t.artists || []).map(a => both(a.name, a.nameRomaji)).join(", "),
+        title: both(t.title, t.titleRomaji),
+        art: al ? `https://cdn.listen.moe/covers/${encodeURIComponent(al.image)}` : null,
+        ts: Date.parse(d.startTime) || null, len: (t.duration || 0) * 1000, listeners: d.listeners,
+      };
+      applyMetas({ [i]: c.meta });
+    };
+    ws.onclose = () => { clearInterval(c.beat); c.ws = null; setTimeout(() => moeConnect(i), 5000); };
+  }
+
   // Cover art for songs whose station sends none: ask the iTunes Search API (CORS-open).
   // Only accept a hit whose artist resembles ours, so a shared song title can't pull in a stranger.
   const artCache = new Map();
@@ -557,7 +581,9 @@
     indexes.forEach(i => (bySource[sourceOf(i)] ||= []).push(i));
     const results = await Promise.all(Object.entries(bySource).map(([name, ix]) =>
       SOURCES[name](ix).catch(e => { console.warn("metadata", name, e); return {}; })));
-    const metas = Object.assign({}, ...results);
+    applyMetas(Object.assign({}, ...results));
+  }
+  function applyMetas(metas) {
     for (const i of Object.keys(metas)) {
       const m = metas[i], prev = state.nowByStation[i];
       if (m && !m.art && prev && prev.key === m.key) m.art = prev.art; // keep art found earlier

@@ -2,11 +2,14 @@
 """Resolve stations-korea.md into korea/stations.js for the Korean player.
 
 stations-korea.md holds blocks of "Station name" followed by the station's page. This
-radio mixes three kinds of station, each recognized by its page URL:
+radio mixes three kinds of station, each recognized by its page URL. All are free of
+commercials, which is why ad-funded networks such as laut.fm are left out:
 
-  bigbradio.net/<channel>   Big B Radio, run on Centova Cast. The page names the Centova
-                            host; the stream and "now playing" call follow from it.
-  laut.fm/<station>         laut.fm. Stream and song info come from laut.fm's public API.
+  bigbradio.net/<channel>   Big B Radio, a nonprofit on Centova Cast. The page names the
+                            Centova host; the stream and "now playing" call follow from it.
+  listen.moe/kpop           LISTEN.moe, listener-funded. Its stream sends no CORS header, so
+                            it plays outside Web Audio (cors: false); songs arrive over a
+                            WebSocket.
   onair.kbs.co.kr/...ch_code=<n>
                             KBS. Its stream links are signed and expire, so the player
                             asks KBS for a fresh one each time; here we only keep the code.
@@ -46,15 +49,13 @@ def bigb(s, url):
     }
 
 
-def laut(s, url):
-    name = url.path.strip("/").split("/")[0]
-    info = json.loads(get(f"https://api.laut.fm/station/{name}"))
+def listenmoe(s, url):
+    channel = url.path.strip("/") or "jpop"  # listen.moe/ is J-pop, listen.moe/kpop is K-pop
+    base = "https://listen.moe" + ("/kpop" if channel == "kpop" else "")
     return {
-        # stream.laut.fm/<name> redirects here without a CORS header, which the browser
-        # rejects for Web Audio; the per-station host answers CORS itself.
-        "stream": f"https://{name}.stream.laut.fm/{name}",
-        "source": "lautfm", "laut": name,
-        "tagline": (info.get("format") or "").strip(" .") or None,
+        "stream": f"{base}/fallback",  # MP3, which every browser plays (/stream is Ogg)
+        "cors": False,
+        "source": "listenmoe", "gateway": base.replace("https:", "wss:") + "/gateway_v2",
     }
 
 
@@ -69,7 +70,7 @@ def kbs(s, url):
     }
 
 
-KINDS = {"bigbradio.net": bigb, "laut.fm": laut, "onair.kbs.co.kr": kbs}
+KINDS = {"bigbradio.net": bigb, "listen.moe": listenmoe, "onair.kbs.co.kr": kbs}
 
 
 def main():

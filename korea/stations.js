@@ -9,35 +9,27 @@ window.STATIONS = [
     "tagline": "Big B Radio #KPOP"
   },
   {
-    "name": "K-World",
-    "page": "https://laut.fm/k-world",
-    "stream": "https://k-world.stream.laut.fm/k-world",
-    "source": "lautfm",
-    "laut": "k-world",
-    "tagline": null
+    "name": "LISTEN.moe K-Pop",
+    "page": "https://listen.moe/kpop",
+    "stream": "https://listen.moe/kpop/fallback",
+    "cors": false,
+    "source": "listenmoe",
+    "gateway": "wss://listen.moe/kpop/gateway_v2"
   },
   {
-    "name": "Einfach Seoul",
-    "page": "https://laut.fm/einfach-seoul",
-    "stream": "https://einfach-seoul.stream.laut.fm/einfach-seoul",
-    "source": "lautfm",
-    "laut": "einfach-seoul",
-    "tagline": "Korean pop"
-  },
-  {
-    "name": "K-Pop Love",
-    "page": "https://laut.fm/kpop-love",
-    "stream": "https://kpop-love.stream.laut.fm/kpop-love",
-    "source": "lautfm",
-    "laut": "kpop-love",
-    "tagline": "K-Pop Romantic Ballads /  Love Songs"
-  },
-  {
-    "name": "KBS 해피FM",
-    "page": "https://onair.kbs.co.kr/index.html?sname=onair&stype=live&ch_code=22",
+    "name": "KBS 1라디오",
+    "page": "https://onair.kbs.co.kr/index.html?sname=onair&stype=live&ch_code=21",
     "stream": null,
     "source": "kbs",
-    "kbs": "22",
-    "logo": "https://padmin.static.kbs.co.kr/live/2025/3/11/1741700004070_443799.png"
+    "kbs": "21",
+    "logo": "https://padmin.static.kbs.co.kr/live/2025/3/7/1741313100641_442721.png"
+  },
+  {
+    "name": "KBS 한민족방송",
+    "page": "https://onair.kbs.co.kr/index.html?sname=onair&stype=live&ch_code=26",
+    "stream": null,
+    "source": "kbs",
+    "kbs": "26",
+    "logo": "https://padmin.static.kbs.co.kr/live/2025/3/11/1741700004397_443835.png"
   }
 ];

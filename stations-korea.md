@@ -1,14 +1,11 @@
 Big B Radio K-Pop
 https://bigbradio.net/kpop
 
-K-World
-https://laut.fm/k-world
+LISTEN.moe K-Pop
+https://listen.moe/kpop
 
-Einfach Seoul
-https://laut.fm/einfach-seoul
+KBS 1라디오
+https://onair.kbs.co.kr/index.html?sname=onair&stype=live&ch_code=21
 
-K-Pop Love
-https://laut.fm/kpop-love
-
-KBS 해피FM
-https://onair.kbs.co.kr/index.html?sname=onair&stype=live&ch_code=22
+KBS 한민족방송
+https://onair.kbs.co.kr/index.html?sname=onair&stype=live&ch_code=26
