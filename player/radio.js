@@ -42,7 +42,7 @@
           <span class="ind amber" id="indScan">${L.scanning}</span>
           <span class="ind amber" id="indMute">${L.mute}</span>
         </div>
-        <div class="station lit-on" id="stName">&nbsp;</div>
+        <div class="station lit-on" id="stName" dir="auto">&nbsp;</div>
         <div class="line artist glow lit-on" id="artist"><span>&nbsp;</span></div>
         <div class="line title glow lit-on" id="title"><span>&nbsp;</span></div>
         <div class="art lit-on" id="art"><div class="ph glow" id="artPh"><div>♪<small>${L.noArt}</small></div></div><img id="artImg" alt=""></div>
@@ -150,9 +150,9 @@
     b.className = "preset";
     b.innerHTML = `<span class="led"></span><span class="key">${i + 1}</span><span class="pname"></span>`;
     const name = document.createElement("span");
-    name.textContent = s.name;
+    name.textContent = s.name; name.dir = "auto";
     const now = document.createElement("span");
-    now.className = "pnow"; now.textContent = freqFor(i).toFixed(1) + " MHz";
+    now.className = "pnow"; now.dir = "auto"; now.textContent = freqFor(i).toFixed(1) + " MHz";
     b.querySelector(".pname").append(name, now);
     b.addEventListener("click", () => tune(i));
     $("presetList").appendChild(b);
@@ -397,6 +397,9 @@
   // song started (ms), or null when unknown; len is 0 when unknown. It may return more
   // stations than were asked for. Each station names its source, else the page's default.
   const sourceOf = i => STATIONS[i].source || C.source;
+  // Wrap text in Unicode direction isolates, so Arabic beside Latin (and digits between
+  // them) can't reorder each other: "Umm Kulthum · أم كلثوم – 6of Oshof" stays in order.
+  const iso = t => /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(t) ? `\u2068${t}\u2069` : t;
   const SOURCES = {
     // asia DREAM radio's station software: one history call per station.
     async asiadream(indexes) {
@@ -551,16 +554,53 @@
     ws.onclose = () => { clearInterval(c.beat); c.ws = null; setTimeout(() => moeConnect(i), 5000); };
   }
 
+  // Zeno.fm pushes the stream title ("Artist - Title") over Server-Sent Events. Stations
+  // that don't send song names say "ON AIR - <station>"; show their description instead.
+  const zeno = {};
+  SOURCES.zeno = async function (indexes) {
+    const out = {};
+    for (const i of indexes) {
+      if (!zeno[i]) zenoConnect(i);
+      if (zeno[i].meta) out[i] = zeno[i].meta;
+    }
+    return out;
+  };
+  function zenoConnect(i) {
+    const s = STATIONS[i], c = zeno[i] = {};
+    // EventSource reconnects by itself after a dropped connection.
+    const es = new EventSource(`https://api.zeno.fm/mounts/metadata/subscribe/${s.mount}`);
+    es.onmessage = e => {
+      let t;
+      try { t = JSON.parse(e.data).streamTitle || ""; } catch { return; }
+      t = t.replace(/^\S+\.(com|net|org)\s+-\s+/i, "").trim(); // drop a "Sm3na.com - " source tag
+      const cut = t.indexOf(" - ");
+      const artist = cut > 0 ? t.slice(0, cut).trim() : "", title = (cut > 0 ? t.slice(cut + 3) : t).trim();
+      let meta;
+      if (!t || /^on air\b/i.test(artist || title)) {
+        meta = { key: "on-air", artist: s.nameNative || s.name, title: L.onAir || "", art: s.logo || null, ts: null, len: 0, noLookup: true };
+      } else {
+        const native = (C.artistNames || {})[artist]; // e.g. "Umm Kulthum" -> "أم كلثوم"
+        meta = {
+          key: t, artist: native ? `${artist} · ${iso(native)}` : artist, title,
+          // The first title after connecting was already playing: its start is unknown.
+          find: { artist, title }, art: null, ts: c.meta ? Date.now() : null, len: 0,
+        };
+      }
+      if (c.meta && c.meta.key === meta.key) return; // repeat after a reconnect: keep start time
+      c.meta = meta;
+      applyMetas({ [i]: meta });
+    };
+  }
+
   // Cover art for songs whose station sends none: ask the iTunes Search API (CORS-open).
   // Only accept a hit whose artist resembles ours, so a shared song title can't pull in a stranger.
   const artCache = new Map();
   const norm = t => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
-  function findArt(m) {
-    if (!m.artist || !m.title) return Promise.resolve(null);
-    const term = `${m.artist} ${m.title}`;
-    if (!artCache.has(term)) {
-      const want = norm(m.artist);
-      artCache.set(term, fetch(`https://itunes.apple.com/search?entity=song&limit=5&term=${encodeURIComponent(term)}`)
+  function itunes(entity, term, artist) {
+    const key = `${entity}|${term}`;
+    if (!artCache.has(key)) {
+      const want = norm(artist);
+      artCache.set(key, fetch(`https://itunes.apple.com/search?entity=${entity}&limit=5&term=${encodeURIComponent(term)}`)
         .then(r => r.ok ? r.json() : { results: [] })
         .then(d => {
           const hit = d.results.find(x => {
@@ -571,7 +611,16 @@
         })
         .catch(() => null));
     }
-    return artCache.get(term);
+    return artCache.get(key);
+  }
+  // m.find, when present, holds the names to search by (e.g. Latin script).
+  async function findArt(m, station) {
+    const { artist, title } = m.find || m;
+    if (!artist || !title) return null;
+    return await itunes("song", `${artist} ${title}`, artist)
+      // Some stations play artists whose song titles iTunes spells differently: any album
+      // cover by the same artist beats an empty frame.
+      || (station.artFallback === "artist" ? await itunes("album", artist, artist) : null);
   }
 
   let lastPoll = 0;
@@ -589,7 +638,7 @@
       if (m && !m.art && prev && prev.key === m.key) m.art = prev.art; // keep art found earlier
       state.nowByStation[i] = m;
       updatePresetCaption(+i);
-      if (m && !m.art && !m.noLookup) findArt(m).then(url => {
+      if (m && !m.art && !m.noLookup) findArt(m, STATIONS[i]).then(url => {
         if (!url) return;
         m.art = url;
         if (state.meta === m) { showArt(m); updateMediaSession(); }
@@ -602,7 +651,7 @@
 
   function updatePresetCaption(i) {
     const m = state.nowByStation[i];
-    const now = m ? [m.artist, m.title].filter(Boolean).join(" – ") : "";
+    const now = m ? [m.artist, m.title].filter(Boolean).map(iso).join(" – ") : "";
     presetEls[i].now.textContent = now || freqFor(i).toFixed(1) + " MHz";
     presetEls[i].b.title = now ? `${STATIONS[i].name}\n${now}` : STATIONS[i].name;
   }
@@ -611,13 +660,16 @@
     const span = el.querySelector("span");
     if (span.textContent === text && !animate) return;
     span.textContent = text || " ";
+    // Arabic (or Hebrew) text reads right to left: align it right and scroll it rightwards.
+    const rtl = /^[^\p{L}]*[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(text || "");
+    el.dir = rtl ? "rtl" : "ltr";
     el.classList.remove("scroll", "swap");
     void el.offsetWidth;
     if (animate) el.classList.add("swap");
     requestAnimationFrame(() => {
       const over = span.scrollWidth - el.clientWidth;
       if (over > 4) {
-        el.style.setProperty("--dist", -(over + 20) + "px");
+        el.style.setProperty("--dist", (rtl ? 1 : -1) * (over + 20) + "px");
         el.style.setProperty("--dur", Math.max(8, over / 25) + "s");
         el.classList.add("scroll");
       }
