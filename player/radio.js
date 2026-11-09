@@ -565,44 +565,6 @@
     ws.onclose = () => { clearInterval(c.beat); c.ws = null; setTimeout(() => moeConnect(i), 5000); };
   }
 
-  // Zeno.fm pushes the stream title ("Artist - Title") over Server-Sent Events. Stations
-  // that don't send song names say "ON AIR - <station>"; show their description instead.
-  const zeno = {};
-  SOURCES.zeno = async function (indexes) {
-    const out = {};
-    for (const i of indexes) {
-      if (!zeno[i]) zenoConnect(i);
-      if (zeno[i].meta) out[i] = zeno[i].meta;
-    }
-    return out;
-  };
-  function zenoConnect(i) {
-    const s = STATIONS[i], c = zeno[i] = {};
-    // EventSource reconnects by itself after a dropped connection.
-    const es = new EventSource(`https://api.zeno.fm/mounts/metadata/subscribe/${s.mount}`);
-    es.onmessage = e => {
-      let t;
-      try { t = JSON.parse(e.data).streamTitle || ""; } catch { return; }
-      t = t.replace(/^\S+\.(com|net|org)\s+-\s+/i, "").trim(); // drop a "Sm3na.com - " source tag
-      const cut = t.indexOf(" - ");
-      const artist = cut > 0 ? t.slice(0, cut).trim() : "", title = (cut > 0 ? t.slice(cut + 3) : t).trim();
-      let meta;
-      if (!t || /^on air\b/i.test(artist || title)) {
-        meta = { key: "on-air", artist: s.nameNative || s.name, title: L.onAir || "", art: s.logo || null, ts: null, len: 0, noLookup: true };
-      } else {
-        const native = (C.artistNames || {})[artist]; // e.g. "Umm Kulthum" -> "أم كلثوم"
-        meta = {
-          key: t, artist: native ? `${artist} · ${iso(native)}` : artist, title,
-          // The first title after connecting was already playing: its start is unknown.
-          find: { artist, title }, art: null, ts: c.meta ? Date.now() : null, len: 0,
-        };
-      }
-      if (c.meta && c.meta.key === meta.key) return; // repeat after a reconnect: keep start time
-      c.meta = meta;
-      applyMetas({ [i]: meta });
-    };
-  }
-
   // Cover art for songs whose station sends none: ask the iTunes Search API (CORS-open).
   // Only accept a hit whose artist resembles ours, so a shared song title can't pull in a stranger.
   const artCache = new Map();
@@ -624,14 +586,9 @@
     }
     return artCache.get(key);
   }
-  // m.find, when present, holds the names to search by (e.g. Latin script).
-  async function findArt(m, station) {
-    const { artist, title } = m.find || m;
-    if (!artist || !title) return null;
-    return await itunes("song", `${artist} ${title}`, artist)
-      // Some stations play artists whose song titles iTunes spells differently: any album
-      // cover by the same artist beats an empty frame.
-      || (station.artFallback === "artist" ? await itunes("album", artist, artist) : null);
+  function findArt(m) {
+    if (!m.artist || !m.title) return Promise.resolve(null);
+    return itunes("song", `${m.artist} ${m.title}`, m.artist);
   }
 
   let lastPoll = 0;
@@ -649,7 +606,7 @@
       if (m && !m.art && prev && prev.key === m.key) m.art = prev.art; // keep art found earlier
       state.nowByStation[i] = m;
       updatePresetCaption(+i);
-      if (m && !m.art && !m.noLookup) findArt(m, STATIONS[i]).then(url => {
+      if (m && !m.art && !m.noLookup) findArt(m).then(url => {
         if (!url) return;
         m.art = url;
         if (state.meta === m) { showArt(m); updateMediaSession(); }
