@@ -7,6 +7,10 @@ Each asia DREAM radio player page embeds the real Shoutcast stream URL (in
 We scrape those out so the browser can play the stream directly and poll
 `<api-base>/history/?limit=1&server=<id>` for artist, title and artwork.
 
+A block may instead give NHK WORLD's Japanese-language stream (masterpl.hls.nhkworld.jp,
+an HLS playlist). That service relays NHK Radio 1 from Tokyo, which NHK doesn't stream
+outside Japan itself; the player shows the program on air from NHK's program guide.
+
 Run again whenever stations.md changes:  python3 resolve_stations.py
 """
 import json
@@ -31,7 +35,21 @@ def parse_md(text):
     return stations
 
 
+def resolve_nhk(station):
+    req = urllib.request.Request(station["page"], headers={"User-Agent": "Mozilla/5.0"})
+    playlist = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+    if not playlist.startswith("#EXTM3U"):
+        raise ValueError("not an HLS playlist")
+    return {
+        **station, "stream": station["page"],
+        "source": "nhk", "nhkArea": "130",  # Tokyo's Radio 1 schedule
+        "tagline": "NHKラジオ第1 · 東京",
+    }
+
+
 def resolve(station):
+    if "nhkworld.jp" in station["page"]:
+        return resolve_nhk(station)
     req = urllib.request.Request(station["page"], headers={"User-Agent": "Mozilla/5.0"})
     html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
 
@@ -60,7 +78,7 @@ def main():
         try:
             r = resolve(s)
             resolved.append(r)
-            print(f"ok   {r['name']}: {r['stream']}  (meta server {r['serverId']})")
+            print(f"ok   {r['name']}: {r['stream']}  ({r.get('source') or 'meta server ' + str(r['serverId'])})")
         except Exception as e:  # keep going; one dead page shouldn't break the radio
             print(f"FAIL {s['name']}: {e}", file=sys.stderr)
     OUT.write_text(

@@ -47,5 +47,13 @@ window.STATIONS = [
     "api": "https://kathy.torontocast.com:3310/api/v2",
     "serverId": 4,
     "pageTitle": "J-Rock Powerplay Player"
+  },
+  {
+    "name": "NHK ラジオ日本",
+    "page": "https://masterpl.hls.nhkworld.jp/hls/r1/live/master.m3u8",
+    "stream": "https://masterpl.hls.nhkworld.jp/hls/r1/live/master.m3u8",
+    "source": "nhk",
+    "nhkArea": "130",
+    "tagline": "NHKラジオ第1 · 東京"
   }
 ];

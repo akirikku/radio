@@ -15,3 +15,6 @@ https://asiadreamradio.torontocast.stream/stations/natsukashiiplayer.html
 
 J-Rock Powerplay
 https://asiadreamradio.torontocast.stream/stations/jrockplayer.html
+
+NHK ラジオ日本
+https://masterpl.hls.nhkworld.jp/hls/r1/live/master.m3u8

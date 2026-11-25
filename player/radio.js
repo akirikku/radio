@@ -397,6 +397,7 @@
   // song started (ms), or null when unknown; len is 0 when unknown. It may return more
   // stations than were asked for. Each station names its source, else the page's default.
   const sourceOf = i => STATIONS[i].source || C.source;
+  const nhkGuide = {}; // NHK program guide per area, kept until its current program ends
   // Wrap text in Unicode direction isolates, so Arabic beside Latin (and digits between
   // them) can't reorder each other: "Umm Kulthum · أم كلثوم – 6of Oshof" stays in order.
   const iso = t => /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(t) ? `\u2068${t}\u2069` : t;
@@ -420,6 +421,36 @@
             artist: artist || "", title: title || "",
             art: art && !/default_track_img/.test(art) ? art : null,
             ts: t.ts, len: t.length, listeners: t.n_listeners,
+          };
+        } catch (e) { console.warn("metadata", s.name, e); }
+      }));
+      return out;
+    },
+
+    // NHK publishes its program guide, not songs: show the program, segment and time slot.
+    // NHK WORLD's Japanese service relays Radio 1 from Tokyo, so the Tokyo guide applies.
+    // The guide is ~100 KB, so it's fetched again only once the current program has ended.
+    async nhk(indexes) {
+      const out = {}, now = Date.now();
+      await Promise.all(indexes.map(async i => {
+        const s = STATIONS[i], area = s.nhkArea || "130";
+        const onNow = list => (list || []).find(e => Date.parse(e.startDate) <= now && now < Date.parse(e.endDate));
+        try {
+          let p = onNow(nhkGuide[area]);
+          if (!p) {
+            const r = await fetch(`https://api.nhk.jp/r8/pg/now/radio/${area}/now.json`, { cache: "no-store" });
+            if (!r.ok) throw new Error(r.status);
+            nhkGuide[area] = (await r.json()).r1?.publication;
+            p = onNow(nhkGuide[area]);
+          }
+          if (!p) { out[i] = { key: "off-schedule", artist: "", title: "", art: null, ts: null, len: 0, noLookup: true }; return; }
+          const series = p.about?.partOfSeries, logo = series?.logo || series?.eyecatch;
+          const ts = Date.parse(p.startDate), artist = series?.name || p.name;
+          out[i] = {
+            key: p.id || `${p.name}|${p.startDate}`,
+            artist, title: p.name !== artist ? p.name : "",
+            art: logo?.medium?.url || logo?.main?.url || null, fit: "contain",
+            ts, len: Date.parse(p.endDate) - ts, noLookup: true,
           };
         } catch (e) { console.warn("metadata", s.name, e); }
       }));
