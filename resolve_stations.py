@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve stations.md into stations.js for the radio player.
+"""Resolve stations.md into japan/stations.js for the Japanese radio player.
 
 stations.md holds blocks of "Station name" followed by its player page URL.
 Each asia DREAM radio player page embeds the real Shoutcast stream URL (in
@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "stations.md"
-OUT = HERE / "stations.js"
+OUT = HERE / "japan" / "stations.js"
 
 
 def parse_md(text):
@@ -68,7 +68,7 @@ def main():
         "window.STATIONS = " + json.dumps(resolved, ensure_ascii=False, indent=2) + ";\n",
         encoding="utf-8",
     )
-    print(f"wrote {len(resolved)} stations to {OUT.name}")
+    print(f"wrote {len(resolved)} stations to {OUT.relative_to(HERE)}")
 
 
 if __name__ == "__main__":

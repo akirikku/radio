@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>茜 Akane Radio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=Share+Tech+Mono&family=Noto+Sans+JP:wght@400;700&family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../player/radio.css">
+<style>
+:root {
+  --font-body: "Noto Sans JP", system-ui, sans-serif;
+  --font-vfd: "Share Tech Mono", "Noto Sans JP", monospace;
+  --font-mark: "Shippori Mincho", serif;
+}
+</style>
+</head>
+<body>
+<script>
+window.RADIO = {
+  id: "akane",
+  title: "茜 Akane Radio",
+  source: "asiadream",
+  band: { min: 76, max: 90, first: 77, last: 89 }, // Japanese FM band
+  labels: {
+    mark: "茜", brand: "AKANE", model: "AR-7700",
+    subtitle: "FM Stereo Tuner · ステレオチューナー",
+    dialTag: "周波数 MHz",
+    memory: 'Memory · <span class="native">プリセット</span>',
+    push: "PUSH POWER",
+    tuned: "TUNED", scanning: "SCAN", mute: "MUTE", noArt: "NO ART",
+    down: "◀ DOWN", scan: "SCAN", up: "UP ▶",
+    tuning: 'Tuning · <span class="native">選局</span>',
+    power: "POWER", powerNote: "電源",
+    phones: "Phones",
+    volume: 'Volume<br><span class="native">音量</span>',
+    ariaPresets: "Station presets", ariaDown: "Tune down", ariaScan: "Auto scan", ariaUp: "Tune up",
+    ariaTuning: "Tuning", ariaPower: "Power", ariaVolume: "Volume",
+    keys: "<kbd>1</kbd>–<kbd>6</kbd> presets &nbsp; <kbd>←</kbd><kbd>→</kbd> tune &nbsp; <kbd>↑</kbd><kbd>↓</kbd> volume &nbsp; <kbd>S</kbd> scan &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Space</kbd> power",
+    credit: 'Streams courtesy of <a href="https://asiadreamradio.com" target="_blank" rel="noopener">asia DREAM radio</a> &nbsp;·&nbsp; <a href="../korea/">노을 Noeul</a> (Korean) · <a href="../">All radios</a>',
+    listening: n => `${n} listening`,
+    fallbackArtist: "asia DREAM radio",
+    noStations: "NO STATIONS — run resolve_stations.py",
+  },
+};
+</script>
+<script src="stations.js"></script>
+<script src="../player/radio.js"></script>
+</body>
+</html>

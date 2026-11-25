@@ -426,56 +426,6 @@
       return out;
     },
 
-    // İstanbul FM: the same call istanbulfm.com.tr makes returns every channel with its
-    // current song. It answers CORS with *, and a form-encoded POST needs no preflight.
-    async istanbulfm() {
-      const r = await fetch("https://api.istanbulfm.com.tr/v1/Route/get?url=/radyolar", {
-        method: "POST", cache: "no-store",
-        body: "client=web&lang=tr&devicePlatform=1&deviceType=0&deviceID=127.0.0.1",
-        headers: { "Content-type": "application/x-www-form-urlencoded" },
-      });
-      if (!r.ok) throw new Error(r.status);
-      const channels = {};
-      (function walk(o) {
-        if (Array.isArray(o)) o.forEach(walk);
-        else if (o && typeof o === "object") {
-          if (o.appClass === "Channels" && o.timeline && !(o.ID in channels)) channels[o.ID] = o;
-          Object.values(o).forEach(walk);
-        }
-      })((await r.json()).data);
-      const out = {}, now = Date.now();
-      // When each song was first seen, kept across visits: the side channels' data sometimes
-      // freezes on one song for hours, and this is how we notice.
-      const seen = store.get("seen", {});
-      STATIONS.forEach((s, i) => {
-        const t = channels[s.channelId]?.timeline?.[0];
-        if (!t) return;
-        const key = `${t.songID}|${t.artistTitle}|${t.songTitle}`;
-        const prev = state.nowByStation[i];
-        const len = (t.duration || 0) * 1000;
-        if (seen[s.channelId]?.key !== key) seen[s.channelId] = { key, at: now };
-        if (t.hide_counter && len && now - seen[s.channelId].at > len + 120e3) {
-          // Still "playing" two minutes after the song must have ended: the data is stuck.
-          // Say so rather than show a song that isn't on.
-          out[i] = { key: "stale", artist: L.noSongInfo || "", title: "", art: s.logo, ts: null, len: 0, noLookup: true };
-          return;
-        }
-        // Only the main channel reports a real countdown (hide_counter false). For the
-        // others we know where the song is only once we've seen it start.
-        let ts = null;
-        if (!t.hide_counter && len) ts = now - len + t.remainingSeconds * 1000;
-        else if (prev && prev.key !== key) ts = now;
-        else if (prev) ts = prev.ts;
-        out[i] = {
-          key, ts, len,
-          artist: t.artistTitle || "", title: t.songTitle || "",
-          art: t.image ? `${t.image.prefix}250x250${t.image.suffix}` : s.logo,
-        };
-      });
-      store.set("seen", seen);
-      return out;
-    },
-
     // Centova Cast stations (Big B Radio): the station's own "now playing" call.
     async centova(indexes) {
       const out = {};
